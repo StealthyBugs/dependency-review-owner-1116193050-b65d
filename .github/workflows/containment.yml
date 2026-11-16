@@ -1,0 +1,77 @@
+name: dependency-review-valid-policy-containment
+on:
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  containment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact lower data commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: test8177/dependency-review-data-1116193050-b65d
+          ref: 9cf8c2d151f5544295da60e9ddf930d585dab3d0
+          persist-credentials: false
+      - name: Materialize owner-only valid policy
+        shell: bash
+        env:
+          PROTECTED_POLICY: ${{ secrets.PROTECTED_POLICY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          protected="$RUNNER_TEMP/dependency-review-owner-policy-095aa006999766"
+          mkdir -p "$protected"
+          printf '%s' "$PROTECTED_POLICY" > "$protected/policy.yml"
+          unset PROTECTED_POLICY
+          test "$(stat -c '%a' "$protected/policy.yml")" = 600
+          test "$(sha256sum "$protected/policy.yml" | cut -d' ' -f1)" = '787354e868d84a1a0c1590fe0b050402d0141261cb2c39e7bbedbaca45cca8d4'
+          test -L "$GITHUB_WORKSPACE/cases/protected-policy.yml"
+          test "$(sha256sum "$GITHUB_WORKSPACE/cases/protected-policy.yml" | cut -d' ' -f1)" = '787354e868d84a1a0c1590fe0b050402d0141261cb2c39e7bbedbaca45cca8d4'
+          echo 'OWNER_POLICY_MATERIALIZED=true' 'CANDIDATE_TARGET_DIGEST_MATCH=true'
+      - name: Regular valid lower control
+        id: regular
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294
+        with:
+          repo-token: ${{ github.token }}
+          base-ref: b353a10d221bd5e6959ecd0b38aa0c40eb113ae5
+          head-ref: b88b970fd530742132bab723e924b797ff36de86
+          config-file: "cases/regular.yml"
+      - name: Invalid lower YAML control
+        id: invalid
+        continue-on-error: true
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294
+        with:
+          repo-token: ${{ github.token }}
+          base-ref: b353a10d221bd5e6959ecd0b38aa0c40eb113ae5
+          head-ref: b88b970fd530742132bab723e924b797ff36de86
+          config-file: "cases/invalid.yml"
+      - name: Candidate owner-only valid policy through lower symlink
+        id: candidate
+        continue-on-error: true
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294
+        with:
+          repo-token: ${{ github.token }}
+          base-ref: b353a10d221bd5e6959ecd0b38aa0c40eb113ae5
+          head-ref: b88b970fd530742132bab723e924b797ff36de86
+          config-file: "cases/protected-policy.yml"
+      - name: Owner outcome and digest readback
+        if: ${{ always() }}
+        shell: bash
+        env:
+          CANDIDATE_INVALID_LICENSES: ${{ steps.candidate.outputs.invalid-license-changes }}
+          INVALID_CONTROL_OUTPUT: ${{ steps.invalid.outputs.invalid-license-changes }}
+        run: |
+          set -euo pipefail
+          protected="$RUNNER_TEMP/dependency-review-owner-policy-095aa006999766"
+          test '${{ steps.regular.outcome }}' = success
+          test '${{ steps.invalid.outcome }}' = failure
+          test '${{ steps.candidate.outcome }}' = failure
+          test "$(sha256sum "$protected/policy.yml" | cut -d' ' -f1)" = '787354e868d84a1a0c1590fe0b050402d0141261cb2c39e7bbedbaca45cca8d4'
+          test "$(sha256sum "$GITHUB_WORKSPACE/cases/protected-policy.yml" | cut -d' ' -f1)" = '787354e868d84a1a0c1590fe0b050402d0141261cb2c39e7bbedbaca45cca8d4'
+          test -n "$CANDIDATE_INVALID_LICENSES"
+          node -e 'const x=JSON.parse(process.env.CANDIDATE_INVALID_LICENSES); if(!Array.isArray(x.forbidden)||!x.forbidden.some(v=>JSON.stringify(v).includes("is-number"))) process.exit(1)'
+          test -z "$INVALID_CONTROL_OUTPUT"
+          echo 'REGULAR_VALID_SUCCESS=true' 'INVALID_PARSE_FAILURE=true' 'CANDIDATE_VALID_POLICY_FAILURE=true'
+          echo 'CANDIDATE_INVALID_LICENSE_OUTPUT_MATCH=true' 'OWNER_DIGEST_STABLE=true'
