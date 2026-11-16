@@ -1,1 +1,1 @@
-{"name":"dependency-review-fixture","version":"1.0.0","private":true}
+{"name":"dependency-review-fixture","version":"1.0.0","private":true,"dependencies":{"is-number":"7.0.0"}}
